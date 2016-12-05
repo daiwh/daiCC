@@ -225,6 +225,7 @@ void struct_declaration_list(Type* type)
 
 /*************************************************************
                    计算字节对齐位置
+				   align:对其粒度
 *************************************************************/
 int calc_align(int n, int align)
 {
@@ -232,27 +233,32 @@ int calc_align(int n, int align)
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 /*************************************************************
                      结构体成员申明
 *************************************************************/
 void struct_declaration(int *maxalign, int *offset, Symbol ***ps)
 {
-	type_specifier(); //解析类型区分符
+	int v, size, align;
+	Symbol *ss;
+	Type type1, btype;
+	int force_align;
+	type_specifier(&btype); //解析类型区分符
 	while(1)
 	{
-		declarator();
+		v = 0;
+		type1 = btype;
+		declarator(&type1, &v, &force_align);
+		size = type_size(&type1, &align);
+
+		if(force_align & ALIGN_SET)
+			align = force_align &~ALIGN_SET;
+		*offset = calc_align(*offset, align);
+		if(align > *maxalign)
+			*maxalign = align;
+		ss = sym_push(v|SC_MEMBER, &type1, 0, *offset);
+		*offset += size;
+		**ps = ss;
+		*ps = &ss->nest;
 
 		if(token==TK_SEMICOLON)
 			break;
@@ -263,26 +269,13 @@ void struct_declaration(int *maxalign, int *offset, Symbol ***ps)
 	skip(TK_SEMICOLON);
 }
 
-/*******************************************************
-         用于函数申明上，用在数据申明上忽略掉
-********************************************************/
-void function_calling_convention(int *fc)
- {
-	*fc=KW_CDECL;
-	if(token==KW_CDECL||token==KW_STDCALL)
-	{
-		*fc=token;
-		if(print)
-		syntax_state=SNTX_SP;
-		get_token();
-	}
-}
-
 /********************************************************
                      结构成员对齐
+					 force_align:强制对其粒度
 *********************************************************/
-void struct_member_alignment()
+void struct_member_alignment(int * force_align)
 {
+	int align = 1;
 	if(token==KW_ALIGN)
 	{
 		get_token();
@@ -290,80 +283,117 @@ void struct_member_alignment()
 		if(token==TK_CINT)
 		{
 			get_token();
+			align=tkvalue;
 		}
 		else
 			expect("<整数常量>");
 		skip(TK_CLOSEPA);
+		if(align!=1 && align!=2 && align!=4)
+			align=1;
+		align |= ALIGN_SET;
+		*force_align = align;
 	}
+	else
+		*force_align = 1;
 }
 
 /********************************************************
                     申明符
 *********************************************************/
-void declarator()
+void declarator(Type *type, int *v, int *force_align)
 {
 	int fc;
 	while(token==TK_STAR)
 	{
+		mk_pointer(type);
 		get_token();
 	}
 	function_calling_convention(&fc);
-	struct_member_alignment();
-	direct_declarator();
+	struct_member_alignment(force_align);
+	direct_declarator(type, v, fc);
+}
+/*******************************************************
+         解析函数调用约定
+		 用于函数申明上，用在数据申明上忽略掉
+********************************************************/
+void function_calling_convention(int *fc)
+ {
+	*fc=KW_CDECL;
+	if(token==KW_CDECL||token==KW_STDCALL)
+	{
+		*fc=token;
+		get_token();
+		if(print)
+			syntax_state=SNTX_SP;
+	}
 }
 
 /*******************************************************
                    直接申明符
 *******************************************************/
-void direct_declarator()
+void direct_declarator(Type *type, int *v, int func_call)
 {
 	if(token>=TK_IDENT)
 	{
+		*v = token;
 		get_token();
 	}
 	else
 	{
 		expect("标识符");
 	}
-	direct_declarator_postfix();
+	direct_declarator_postfix(type, func_call);
 }
 
 /*******************************************************
                  直接申明后缀
 *******************************************************/
-void direct_declarator_postfix()
+void direct_declarator_postfix(Type *type, int func_call)
 {
 	int n;
+	Symbol *s;
 	if(token==TK_OPENPA)
 	{
-		parameter_type_list();
+		parameter_type_list(type, func_call);
 	}
 	else if(token==TK_OPENBR)
 	{
 		get_token();
+		n = -1;
 		if(token==TK_CINT)
 		{
 			get_token();
 			n=tkvalue;
 		}
 		skip(TK_CLOSEBR);
-		direct_declarator_postfix();
+		direct_declarator_postfix(type, func_call);
+		s = sym_push(SC_ANOM, type, 0, n);
+		type->t = T_ARRAY|T_PTR;
+		type->ref = s;
 	}
 }
 
 /*******************************************************************
                       形参类型表
 *******************************************************************/
-void parameter_type_list(int func_call)
+void parameter_type_list(Type *type, int func_call)
 {
+	int n;
+	Symbol **plast, *s, *first;
+	Type pt;
 	get_token();
+	first = NULL;
+	plast=&first;
 	while(token!=TK_CLOSEPA)
 	{
-		if(!type_specifier())
+		if(!type_specifier(&pt))
 		{
 			error("无效标识符");
 		}
-		declarator();
+		declarator(&pt, &n, NULL);
+		s = sym_push(n|SC_PARAMS, &pt, 0, 0);
+		*plast=s;
+		plast=&s->nest;
 		if(token==TK_CLOSEPA)
 			break;
 		skip(TK_COMMA);
@@ -375,6 +405,11 @@ void parameter_type_list(int func_call)
 		}
 	}
 	skip(TK_CLOSEPA);
+	//此处将函数返回类型存储，然后指向参数，最后将type设为函数类型，应用的相关信息放在ref中
+	s = sym_push(SC_ANOM, type, func_call, 0);
+	s->nest = first;
+	type->t = T_FUNC;
+	type->ref = s;
 	if(print)
 	{
 		syntax_state=SNTX_DELAY;
@@ -389,17 +424,25 @@ void parameter_type_list(int func_call)
 /***************************************************
                    函数体
 ***************************************************/
- void funcbody()
+ void funcbody(Symbol *sym)
 {
-	compound_statement();
+	//放一匿名符号在局部符号表中
+	sym_direct_push(&local_sym_stack, SC_ANOM, &int_type, 0);
+	compound_statement(NULL, NULL);
+	//清空局部符号栈
+	sym_pop(&local_sym_stack, NULL);
 }
 
 /***************************************************
-                   初值符
+                   变量初始化
+				   初值符
 ****************************************************/
-void initializer()
+void initializer(Type *type)
 {
-	assignment_expression();
+	if(type->t & T_ARRAY)
+		get_token();
+	else
+		assignment_expression();
 }
 
 
@@ -439,9 +482,14 @@ void statement(int *bsym, int *csym)
 
 /************************************************************
                        复合语句
+					   bsym:break跳转位置
+					   csym:continue跳转位置
 *************************************************************/
-void compound_statement()
+void compound_statement(int *bsym, int *csym)
 {
+	Symbol *s;
+	s = (Symbol *)stack_get_top(&local_sym_stack);
+
 	if(print)
 	{
 		syntax_state=SNTX_LF_HT;
@@ -452,16 +500,119 @@ void compound_statement()
 	
 	while(is_type_specifier(token))
 	{
-		external_declaration();
+		external_declaration(SC_LOCAL);
 	}
 	while(token!=TK_END)
 	{
-		statement();
+		statement(bsym, csym);
 	}
+	sym_pop(&local_sym_stack, s);
 	if(print)
-	syntax_state=SNTX_LF_HT;
+		syntax_state=SNTX_LF_HT;
 	get_token();
 }
+
+/************************************************
+              sizeof表达式
+************************************************/
+void sizeof_expression()
+{
+	int align,size;
+	Type type;
+
+	get_token();
+	skip(TK_OPENPA);
+	type_specifier(&type);
+	skip(TK_CLOSEPA);
+
+	size = type_size(&type, &align);
+	if(size < 0)
+		error("size 计算类型尺寸失败");
+}
+/******************************************************
+				计算返回类型长度
+				t:数据类型指针
+				a:对齐值
+******************************************************/
+int type_size(Type *t, int *a)
+{
+	Symbol *s;
+	int bt;
+	int PTR_SIZE = 4;
+
+	bt = t->t & T_BTYPE;
+	switch(bt)
+	{
+	case T_STRUCT:
+		s = t->ref;
+		*a = s->r;
+		return s->c;
+	case T_PTR:
+		if(t->t & T_ARRAY)
+		{
+			s = t->ref;
+			return type_size(&s->type, a) * s->c;
+		}
+		else
+		{
+			*a = PTR_SIZE;
+			return PTR_SIZE;
+		}
+	case T_INT:
+		*a = 4;
+		return 4;
+	case T_SHORT:
+		*a = 2;
+		return 2;
+	default:         //char, function, void
+		*a = 1;
+		return 1;
+	}
+}
+
+/******************************************************
+                  初值表达式
+******************************************************/
+void primary_expression()
+{
+	 int t, addr;
+	 Type type;
+	 Symbol *s;
+	 switch(token)
+	 {
+	 case TK_CINT:
+	 case TK_CCHAR:
+		 get_token();
+		 break;
+	 case TK_CSTR:
+		 t = T_CHAR;
+		 type.t = t;
+		 mk_pointer(&type);
+		 type.t |= T_ARRAY;
+		 var_sym_put(&type, SC_GLOBAL, 0, addr);
+		 initializer(&type);
+		 break;
+	 case TK_OPENPA:
+		 get_token();
+		 expression();
+         skip(TK_CLOSEPA);
+         break;
+     default:
+         t=token;
+         get_token();
+         if(t<TK_IDENT)
+           expect("标识符或常量");
+		 s = sym_search(t);
+		 if(!s)
+		 {
+			 if(token != TK_OPENPA)
+				 error("'%s'未声明\n", get_tkstr(t));
+			 s = func_sym_push(t, &default_func_type); //允许函数不声明直接引用
+			 s->r = SC_GLOBAL|SC_SYM;
+		 }
+         break;	   
+	 }
+ }
 
 /******************************************************
                判断是否为类型区分符
@@ -708,17 +859,6 @@ void unary_expression()
 	}
 }
 
-/************************************************
-              sizeof表达式
-************************************************/
-void sizeof_expression()
-{
-	get_token();
-	skip(TK_OPENPA);
-	type_specifier();
-	skip(TK_CLOSEPA);
-}
-
 /***********************************************
                  后缀表达式
 ***********************************************/
@@ -747,35 +887,6 @@ void postfix_expression()
 			break;
 	}
 }
-
-/******************************************************
-                  初值表达式
-******************************************************/
-void primary_expression()
- {
-	 int t;
-	 switch(token)
-	 {
-	 case TK_CINT:
-	 case TK_CCHAR:
-		 get_token();
-		 break;
-	 case TK_CSTR:
-	     get_token();
-		 break;
-	 case TK_OPENPA:
-		 get_token();
-		 expression();
-         skip(TK_CLOSEPA);
-         break;
-     default:
-         t=token;
-         get_token();
-         if(t<TK_IDENT)
-           expect("标识符或常量");
-         break;	   
-	 }
- }
 
 /*******************************************************
                   实参表达式
