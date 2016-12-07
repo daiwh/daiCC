@@ -17,32 +17,36 @@ Symbol *sym_direct_push(Stack *ss, int v, Type *type, int c)
 
 /***************************************************
 将符号放入符号栈中，动态判断是放入全局符号栈还是局部符号栈
+          v:符号编号
+		  type:符号数据类型
+		  r:符号存储类型
+		  c:符号关联值
 ****************************************************/
-Symbol *sym_push(int v,Type *type, int r, int c)
+Symbol *sym_push(int v,Type *type, int r , int c)
 {
 	Symbol *ps, **pps;
-	TKWord *ts;
-	Stack *ss;
-	if(stack_is_empty(&local_sym_stack)==0)
+	TKWord *ts;     //符号所对应的单词
+	Stack *ss;      //标记符号栈
+	if(stack_is_empty(&local_sym_stack)==0)  //如果局部符号栈为空，就放入局部符号栈
 		ss = &local_sym_stack;
-	else
+	else                                     //否则放入全局符号栈
 		ss = &global_sym_stack;
-	ps = sym_direct_push(ss, v, type, c);
-	ps->r = r;
+	ps = sym_direct_push(ss, v, type, c);    //将符号放入指定符号栈中，该函数返回栈顶元素
+	ps->r = r;                      //填充符号存储类型
 
 	//不记录结构体成员及匿名符号
-	if((v & SC_STRUCT) || v < SC_ANOM)
+	if((v & SC_STRUCT) || v < SC_ANOM)//如果(v & SC_STRUCT)不为0，则为结构体符号
 	{
 		//更新单词sym_struct 或 sym_identifier字段
-		ts = (TKWord *)tktable.data[(v &~SC_STRUCT)];
-		if(v & SC_STRUCT)
+		ts = (TKWord *)tktable.data[(v &~SC_STRUCT)];//(v &~SC_STRUCT)的值为v所表示的符号在单词表中的索引值
+		if(v & SC_STRUCT)    //如果符号表示的是结构体，用单词表中的sym_struct字段来填充
 			pps = &ts->sym_struct;
 		else
 			pps = &ts->sym_identifier;
-		ps->prev_tok = *pps;
+		ps->prev_tok = *pps;   //放在同名符号队列中
 	    *pps = ps;
 	}
-	return ps;
+	return ps;//返回该符号队列
 }
 
 /**********************************************************

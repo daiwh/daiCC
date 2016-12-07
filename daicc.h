@@ -133,7 +133,7 @@ enum e_StorageClass
 	SC_ANOM    =0x10000000,  //匿名符号
 	SC_STRUCT  =0x20000000,  //结构体符号
 	SC_MEMBER  =0x40000000,  //结构成员变量
-	SC_PARAMS   =0x80000000,  //函数参数
+	SC_PARAMS  =0x80000000,  //函数参数
 };
 
 enum TokenCode

@@ -1,8 +1,5 @@
 #include "daicc.h"
 
-
-
-
 /***********************************************************************************/
 /*                                   函数申明                                      */
 /***********************************************************************************/
@@ -25,6 +22,7 @@ void translation_unit()
 
 /**********************************************
               解析外部申明
+			  申明与函数定义
 ***********************************************/
 void external_declaration(int l) //l指明存储类型是局部的还是全局的
 {
@@ -104,44 +102,50 @@ void external_declaration(int l) //l指明存储类型是局部的还是全局的
 }
 /***********************************************************
                     解析类型区分符
-				解析成功返回1，不成功返回0
+				    解析成功返回1，不成功返回0
 ************************************************************/
 int type_specifier(Type *type)
 {
 	int t, type_found;
-	Type type;
-	t = 0;
-	type_found = 0;
+	Type type1;         //类型区分符类型的记录
+	t = 0;              //类型区分符的数据类型编码
+	type_found = 0;     //类型区分符是否成功解析
 	switch(token)
 	{
-		case KW_CHAR:
+		case KW_CHAR://如果当前的类型区分符是char，记录数据类型并跳出
 			t = T_CHAR;
 			type_found=1;
-			syntax_state=SNTX_SP;
+			if(print)
+				syntax_state=SNTX_SP;
 			get_token();
 			break;
 		case KW_SHORT:
 			t = T_SHORT;
 			type_found=1;
-			syntax_state=SNTX_SP;
+			if(print)
+				syntax_state=SNTX_SP;
 			get_token();
 			break;	
 		case KW_VOID:
 			t = T_VOID;
 			type_found=1;
-			syntax_state=SNTX_SP;
+			if(print)
+				syntax_state=SNTX_SP;
 			get_token();
 			break;	
 		case KW_INT:
 			t = T_INT;
-			syntax_state=SNTX_SP;
+			if(print)
+				syntax_state=SNTX_SP;
 			type_found=1;
 			get_token();
 			break;	
-		case KW_STRUCT:
+		case KW_STRUCT:               //如果数据类型区分符是结构，进行结构的解析并填充type的数据类型引用符号字段
+			 (&type1); //struct结构解析
+			type->ref = type1.ref;    //填充type的数据类型引用符号字段
 			t = T_STRUCT;
-			syntax_state=SNTX_SP;
-			struct_specifier(); //struct结构解析
+			if(print)
+				syntax_state=SNTX_SP;
 			type_found=1;
 			break;		
 		default: 
@@ -155,12 +159,12 @@ int type_specifier(Type *type)
 *************************************************/
 void struct_specifier(Type *type)
 {
-	int v;
-	Symbol *s;
+	int v;       //已经放入单词表中‘结构名’的索引值
+	Symbol *s;   //符号
 	Type type1;
 
-	get_token(); //取出关键字"struct"后边的单词
-	v=token;
+	get_token(); //取出关键字"struct"后边的单词，也就是结构名
+	v=token;   
 	get_token();
 
     if(print)
@@ -175,19 +179,18 @@ void struct_specifier(Type *type)
 			syntax_state=SNTX_SP; 
 		syntax_indent();
 	}
-	if(v<TK_IDENT)
+	if(v<TK_IDENT) //TK_IDENT是系统定义的标识符和用户定义的标识符的界限，如果当前标识小于该值，说明我们用了系统定义的标识符作为变量名，不合法
 		error("关键字不能作为结构体名");
-	s = struct_search(v);
-	if(!s)
+	s = struct_search(v);//返回结构名在单词表中的记录的sym_struct字段的值（单词所表示的结构定义）
+	if(!s)   //如果此结构名还没有被登记在单词表中，说明此结构还没有被申明
 	{
 		type1.t = KW_STRUCT;
-		s = sym_push(v|SC_STRUCT, &type1, 0, -1); //-1赋值给s->c，标识结构体尚未定义
+		s = sym_push(v|SC_STRUCT, &type1, 0, -1); //-1赋值给s->c，标识结构体尚未定义，最后一个参数为符号关联值
 		s->r = 0;
 	}
-
 	type->t = T_STRUCT;
 	type->ref = s;
-	if(token==TK_BEGIN)    //如果关键字"struct"后边跟的是左大括号，则为结构的申明
+	if(token == TK_BEGIN)    //如果关键字"struct"后边跟的是左大括号，则为结构的申明
 	{
 		struct_declaration_list(type);
 	}
@@ -907,3 +910,4 @@ void argument_expression_list()
 	skip(TK_CLOSEPA);
 }
  
+
